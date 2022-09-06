@@ -42,6 +42,8 @@ parser.add_argument("--skip-grid", action='store_true', help="do not save a grid
 parser.add_argument("--skip-save", action='store_true', help="do not save indiviual samples. For speed measurements.", default=False)
 parser.add_argument('--no-job-manager', action='store_true', help="Don't use the experimental job manager on top of gradio", default=False)
 parser.add_argument("--max-jobs", type=int, help="Maximum number of concurrent 'generate' commands", default=1)
+parser.add_argument("--custom-css", action='store_true', help="Place custom.css in css folder to load a custom theme of the UI", default=False)
+
 opt = parser.parse_args()
 
 #Should not be needed anymore
@@ -69,8 +71,7 @@ import glob
 from typing import List, Union, Dict, Callable, Any
 from pathlib import Path
 from collections import namedtuple
-from functools import partial
-
+import cv2
 from contextlib import contextmanager, nullcontext
 from einops import rearrange, repeat
 from itertools import islice
@@ -136,6 +137,13 @@ elif grid_format[0] == 'webp':
         grid_lossless = True
         grid_quality = abs(grid_quality)
 
+
+def toImgOpenCV(imgPIL): # Conver imgPIL to imgOpenCV
+            i = np.array(imgPIL) # After mapping from PIL to numpy : [R,G,B,A]
+                                # numpy Image Channel system: [B,G,R,A]
+            red = i[:,:,0].copy(); i[:,:,0] = i[:,:,2].copy(); i[:,:,2] = red
+            return i
+def toImgPIL(imgOpenCV): return Image.fromarray(cv2.cvtColor(imgOpenCV, cv2.COLOR_BGR2RGB))
 
 def chunk(it, size):
     it = iter(it)
@@ -1635,9 +1643,10 @@ def imgproc(image,image_batch,imgproc_prompt,imgproc_toggles, imgproc_upscale_to
     output = []
     images = []
     def processGFPGAN(image,strength):
-        image = image.convert("RGB")
-        cropped_faces, restored_faces, restored_img = GFPGAN.enhance(np.array(image, dtype=np.uint8), has_aligned=False, only_center_face=False, paste_back=True)
-        result = Image.fromarray(restored_img)
+        cvimage = toImgOpenCV(image)
+        cropped_faces, restored_faces, restored_img = GFPGAN.enhance(np.array(cvimage, dtype=np.uint8), has_aligned=False, only_center_face=False, paste_back=True)
+        #save restored image
+        result = toImgPIL(restored_img)
         if strength < 1.0:
             result = Image.blend(image, result, strength)
 
@@ -2016,15 +2025,14 @@ def ModelLoader(models,load=False,unload=False,imgproc_realesrgan_model_name='Re
 def run_GFPGAN(image, strength):
     ModelLoader(['LDSR','RealESRGAN'],False,True)
     ModelLoader(['GFPGAN'],True,False)
-    image = image.convert("RGB")
-
-    cropped_faces, restored_faces, restored_img = GFPGAN.enhance(np.array(image, dtype=np.uint8), has_aligned=False, only_center_face=False, paste_back=True)
-    res = Image.fromarray(restored_img)
-
+    cvimage = toImgOpenCV(image)
+    cropped_faces, restored_faces, restored_img = GFPGAN.enhance(np.array(cvimage, dtype=np.uint8), has_aligned=False, only_center_face=False, paste_back=True)
+    #save restored image
+    result = toImgPIL(restored_img)
     if strength < 1.0:
-        res = Image.blend(image, res, strength)
+        result = Image.blend(image, result, strength)
 
-    return res
+    return result
 
 def run_RealESRGAN(image, model_name: str):
     ModelLoader(['GFPGAN','LDSR'],False,True)
